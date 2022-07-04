@@ -6,9 +6,23 @@ import Wallet from "./cardano-wallet-interface";
 import {NamiWalletApi} from "./nami-wallet-api/src/index";
 
 const App = () => {
-  
-  
+  const sendAmount = async () => {
+    let Nami = await NamiWalletApi(
+      window.cardano.yoroi, //nami wallet object
+      "testnetL6w9rku7eJqr30BTxoCulZMAFNw3d05k"
+    )
+    
+    let address = await Nami.getAddress()
+    console.log("address",address)
 
+    let test1  =  await Nami.send({
+      address: "addr_test1qr3pdetl3543te0lzkea5rz5q38a87dl94288zzy62qadt8xrgg7703a73pm97wca06qhvy6khnl4mw9vp0s0pq5ss4szkuchu",
+      amount: 1000
+  })
+  console.log("test1",test1)
+
+
+  }
   const YoroiWalletApi = async () => {
     let Nami = await NamiWalletApi(
       window.cardano.yoroi, //nami wallet object
@@ -17,6 +31,8 @@ const App = () => {
     
     let address = await Nami.getAddress()
     console.log("address",address)
+
+ 
      
 /*    let txHash = await Nami.delegate({
           //poolId: "pool6ff051a96156919654a93f151670fa4b4d10fa61626ddcbeafa5bd71"
@@ -120,9 +136,15 @@ const testFun1 = async () => {
               </button>
               <br></br>
               <button 
-         style={{width:"20%",height:"50px"}}
+                  style={{width:"20%",height:"50px"}}
               onClick={() => testFun1()}>
                 Wallet
+              </button>
+              <br></br>
+              <button 
+                  style={{width:"20%",height:"50px"}}
+              onClick={() => sendAmount()}>
+                Send Amount
               </button>
          </header>
     </div>

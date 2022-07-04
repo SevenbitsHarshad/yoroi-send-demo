@@ -120,9 +120,8 @@ export async function NamiWalletApi(NamiWalletObject, blockfrostApiKey, serializ
     }
 
     
-    async function send({address, amount = 0, assets = [], metadata = null, metadataLabel = '721'} )  {
-        let PaymentAddress = await getAddress()
-
+    async function oldsend({address, amount = 0, assets = [], metadata = null, metadataLabel = '721'} )  {
+        
         let protocolParameter = await _getProtocolParameter()
         let utxos = (await getUtxosHex()).map(u => S.TransactionUnspentOutput.from_bytes(
             Buffer.from(
@@ -130,22 +129,19 @@ export async function NamiWalletApi(NamiWalletObject, blockfrostApiKey, serializ
                 'hex'
             )
         ))
+       
 
-        let lovelace = Math.floor(amount * 1000000).toString()
+        let lovelace = Math.floor(parseInt(amount)  * 1000000).toString()
 
         let ReceiveAddress = address
-        
 
         let multiAsset = _makeMultiAsset(assets)
 
-       
-
-
-
+    
         let outputValue = S.Value.new(
             S.BigNum.from_str(lovelace)
         )
-
+           
         if(assets.length > 0)outputValue.set_multiasset(multiAsset)
 
         let minAda = S.min_ada_required(
@@ -162,7 +158,7 @@ export async function NamiWalletApi(NamiWalletObject, blockfrostApiKey, serializ
                 outputValue
             )
         )
-        
+  
         let RawTransaction = _txBuilder({
             PaymentAddress: PaymentAddress,
             Utxos: utxos,
@@ -172,10 +168,293 @@ export async function NamiWalletApi(NamiWalletObject, blockfrostApiKey, serializ
             MetadataLabel: metadataLabel,
             Delegation: null
         })
+       
+        return await _signSubmitTx(RawTransaction) 
+    }
 
-        return await _signSubmitTx(RawTransaction)
+    async function send({address, amount = 0, assets = [], metadata = null, metadataLabel = '721'} )  {
+        
+        let protocolParameter = await _getProtocolParameter()
+        let utxos = (await getUtxosHex()).map(u => S.TransactionUnspentOutput.from_bytes(
+            Buffer.from(
+                u,
+                'hex'
+            )
+        ))
+       
+
+        let lovelace = Math.floor(parseInt(amount)  * 1000000).toString()
+
+        let ReceiveAddress = address
+
+        let multiAsset = _makeMultiAsset(assets)
+
+    
+        let outputValue = S.Value.new(
+            S.BigNum.from_str(lovelace)
+        )
+           
+        if(assets.length > 0)outputValue.set_multiasset(multiAsset)
+
+     /*    let minAda = S.min_ada_required(
+            outputValue, 
+            S.BigNum.from_str(protocolParameter.minUtxo || "1000000")
+        )
+        if(S.BigNum.from_str(lovelace).compare(minAda) < 0)outputValue.set_coin(minAda) */
+
+
+        let outputs = S.TransactionOutputs.new()
+        outputs.add(
+            S.TransactionOutput.new(
+                S.Address.from_bech32(ReceiveAddress),
+                outputValue
+            )
+        )
+
+            // config
+             const txConfig = S.TransactionBuilderConfigBuilder.new()
+            
+            .fee_algo(
+            S.LinearFee.new(
+                S.BigNum.from_str(protocolParameter.linearFee.minFeeA),
+                S.BigNum.from_str(protocolParameter.linearFee.minFeeB)
+            )
+            )
+            .pool_deposit(S.BigNum.from_str(protocolParameter.poolDeposit))
+            .key_deposit(S.BigNum.from_str(protocolParameter.keyDeposit))
+            .coins_per_utxo_word(S.BigNum.from_str('34482'))
+            /* .max_tx_size(protocolParameter.maxTxSize)
+            .max_value_size(protocolParameter.maxValSize) */
+            .max_value_size(4000)
+            .max_tx_size(8000)
+            .prefer_pure_change(true)
+            .build();
+
+            console.log("txConfig",txConfig)
+
+            // builder
+            const txBuilder = S.TransactionBuilder.new(txConfig); 
+            
+            // outputs
+            txBuilder.add_output(
+            S.TransactionOutputBuilder.new()
+            .with_address(S.Address.from_bech32(ReceiveAddress))
+            .next()
+            .with_value(S.Value.new(S.BigNum.from_str(lovelace)))
+            .build()
+            );
+
+            // convert utxos from wallet connector
+            const utxosFromWalletConnector = (await getUtxosHex()).map((utxo) =>
+            S.TransactionUnspentOutput.from_bytes(Buffer.from(utxo, "hex"))
+            );
+
+            // create TransactionUnspentOutputs for 'add_inputs_from' function
+            const utxoOutputs = S.TransactionUnspentOutputs.new();
+            utxosFromWalletConnector.map((currentUtxo) => {
+            utxoOutputs.add(currentUtxo);
+            });
+
+            // inputs with coin selection
+            // 0 for LargestFirst, 1 RandomImprove 2,3 Mutli asset
+            txBuilder.add_inputs_from(utxoOutputs, 0); 
+            txBuilder.add_change_if_needed(S.Address.from_bech32(await getAddress()));
+
+            const txBody = txBuilder.build();
+            const transaction = S.Transaction.new(
+                txBuilder.build(),
+                S.TransactionWitnessSet.new()
+            );
+
+        
+            /* 
+            let walletServer = await Nami.enable();
+            const witness = await walletServer.signTx(
+            Buffer.from(transaction.to_bytes(), "hex").toString("hex")
+            );
+
+            const signedTx = S.Transaction.new(
+            txBody,
+            S.TransactionWitnessSet.from_bytes(Buffer.from(witness, "hex")),
+            undefined // transaction metadata
+            );
+
+            const txHash = await walletServer.submitTx(
+                Buffer.from(signedTx.to_bytes()).toString("hex")
+            ); 
+ */ 
+
+        return await _signSubmitTx(transaction) 
+           
+
     }
     
+    async function _signSubmitTx(transactionRaw ) {
+        let walletServer = await Nami.enable();
+
+        let transaction = S.Transaction.from_bytes(transactionRaw)
+        const witneses = await walletServer.signTx(
+            Buffer.from(
+                transaction.to_bytes()
+            ).toString('hex')
+        )
+
+        const signedTx = S.Transaction.new(
+            transaction.body(), 
+            S.TransactionWitnessSet.from_bytes(
+                Buffer.from(
+                    witneses,
+                    "hex"
+                )
+            ),
+            transaction.auxiliary_data()
+        )
+
+        const txhash = await walletServer.submitTx(
+            Buffer.from(
+                signedTx.to_bytes()
+            ).toString('hex')
+        )
+        return txhash
+
+    }
+
+    async function olddelegate({poolId, metadata = null, metadataLabel = '721'} ) {
+      
+        let protocolParameter = await _getProtocolParameter()
+        console.log("protocolParameter",protocolParameter)
+        let stakeKeyHash = S.RewardAddress.from_address(
+            S.Address.from_bytes(
+                Buffer.from(
+                    await getRewardAddressHex(),
+                    'hex'
+                )
+            )
+        ).payment_cred().to_keyhash().to_bytes()
+
+        let delegation = await getDelegation(await getRewardAddress())
+        console.log("delegation",await getRewardAddress());
+
+         async function getDelegation(rewardAddr) {
+             
+            let stake = await _blockfrostRequest(`/accounts/${rewardAddr}`) 
+            if(!stake || stake.error || !stake.pool_id) return {}
+
+            return {
+                active: stake.active,
+                rewards: stake.withdrawable_amount,
+                poolId: stake.pool_id,
+            }
+        }
+
+        let pool = await _blockfrostRequest(`/pools/${poolId}`)
+        let poolHex = pool.hex
+
+        let utxos = (await getUtxosHex()).map(u => S.TransactionUnspentOutput.from_bytes(Buffer.from(u, 'hex')))
+        let PaymentAddress = await getAddress()
+
+        let outputs = S.TransactionOutputs.new()
+        outputs.add(
+            S.TransactionOutput.new(
+              S.Address.from_bech32(PaymentAddress),
+              S.Value.new(
+                  S.BigNum.from_str(protocolParameter.keyDeposit)
+              )
+            )
+        )
+
+        /*  let transaction = _txBuilder({
+                PaymentAddress,
+                Utxos: utxos,
+                ProtocolParameter: protocolParameter,
+                Outputs: outputs,
+                Delegation: {
+                    poolHex: poolHex,
+                    stakeKeyHash: stakeKeyHash,
+                    delegation: delegation
+                },
+                Metadata: metadata,
+                MetadataLabel: metadataLabel
+            }) */
+
+            // config
+             const txConfig = S.TransactionBuilderConfigBuilder.new()
+            
+            .fee_algo(
+            S.LinearFee.new(
+                S.BigNum.from_str(protocolParameter.linearFee.minFeeA),
+                S.BigNum.from_str(protocolParameter.linearFee.minFeeB)
+            )
+            )
+            .pool_deposit(S.BigNum.from_str(protocolParameter.poolDeposit))
+            .key_deposit(S.BigNum.from_str(protocolParameter.keyDeposit))
+            .coins_per_utxo_word(S.BigNum.from_str('34482'))
+            /* .max_tx_size(protocolParameter.maxTxSize)
+            .max_value_size(protocolParameter.maxValSize) */
+            .max_value_size(4000)
+            .max_tx_size(8000)
+            .prefer_pure_change(true)
+            .build();
+
+            console.log("txConfig",txConfig)
+
+            // builder
+            const txBuilder = S.TransactionBuilder.new(txConfig); 
+            
+
+            // outputs
+            txBuilder.add_output(
+            S.TransactionOutputBuilder.new()
+            .with_address(S.Address.from_bech32(PaymentAddress))
+            //.with_address(S.Address.from_bech32("eb7832cb137b6d20ee2c3f4892d4938a734326ca18122f0d21e5f587"))
+            .next()
+            .with_value(S.Value.new(S.BigNum.from_str("999978")))
+            .build()
+            );
+
+            // convert utxos from wallet connector
+            const utxosFromWalletConnector = (await getUtxosHex()).map((utxo) =>
+            S.TransactionUnspentOutput.from_bytes(Buffer.from(utxo, "hex"))
+            );
+
+            // create TransactionUnspentOutputs for 'add_inputs_from' function
+            const utxoOutputs = S.TransactionUnspentOutputs.new();
+            utxosFromWalletConnector.map((currentUtxo) => {
+            utxoOutputs.add(currentUtxo);
+            });
+
+            // inputs with coin selection
+            // 0 for LargestFirst, 1 RandomImprove 2,3 Mutli asset
+            txBuilder.add_inputs_from(utxoOutputs, 0); 
+            txBuilder.add_change_if_needed(S.Address.from_bech32(await getAddress()));
+
+            const txBody = txBuilder.build();
+            const transaction = S.Transaction.new(
+                txBuilder.build(),
+                S.TransactionWitnessSet.new()
+            );
+
+            let walletServer = await Nami.enable();
+
+            const witness = await walletServer.signTx(
+            Buffer.from(transaction.to_bytes(), "hex").toString("hex")
+            );
+
+            const signedTx = S.Transaction.new(
+            txBody,
+            S.TransactionWitnessSet.from_bytes(Buffer.from(witness, "hex")),
+            undefined // transaction metadata
+            );
+
+            const txHash = await walletServer.submitTx(
+                Buffer.from(signedTx.to_bytes()).toString("hex")
+            ); 
+
+            return txHash 
+
+       /*  let txHash = await _signSubmitTx(transaction)
+        return txHash   */
+    }
     async function sendMultiple({recipients = [], metadata = null, metadataLabel = '721'})  {
         let PaymentAddress = await getAddress()
 
@@ -573,33 +852,8 @@ export async function NamiWalletApi(NamiWalletObject, blockfrostApiKey, serializ
         return transaction.to_bytes() 
     }
 
-    async function _signSubmitTx(transactionRaw ) {
-        let transaction = S.Transaction.from_bytes(transactionRaw)
-        const witneses = await Nami.signTx(
-            Buffer.from(
-                transaction.to_bytes()
-            ).toString('hex')
-        )
+    
 
-        const signedTx = S.Transaction.new(
-            transaction.body(), 
-            S.TransactionWitnessSet.from_bytes(
-                Buffer.from(
-                    witneses,
-                    "hex"
-                )
-            ),
-            transaction.auxiliary_data()
-        )
-
-        const txhash = await Nami.submitTx(
-            Buffer.from(
-                signedTx.to_bytes()
-            ).toString('hex')
-        )
-        return txhash
-
-    }
     async function _getProtocolParameter() {
         
 
@@ -643,142 +897,7 @@ export async function NamiWalletApi(NamiWalletObject, blockfrostApiKey, serializ
     }
 
 
-    async function olddelegate({poolId, metadata = null, metadataLabel = '721'} ) {
-      
-        let protocolParameter = await _getProtocolParameter()
-        console.log("protocolParameter",protocolParameter)
-        let stakeKeyHash = S.RewardAddress.from_address(
-            S.Address.from_bytes(
-                Buffer.from(
-                    await getRewardAddressHex(),
-                    'hex'
-                )
-            )
-        ).payment_cred().to_keyhash().to_bytes()
-
-        let delegation = await getDelegation(await getRewardAddress())
-        console.log("delegation",await getRewardAddress());
-
-         async function getDelegation(rewardAddr) {
-             
-            let stake = await _blockfrostRequest(`/accounts/${rewardAddr}`) 
-            if(!stake || stake.error || !stake.pool_id) return {}
-
-            return {
-                active: stake.active,
-                rewards: stake.withdrawable_amount,
-                poolId: stake.pool_id,
-            }
-        }
-
-        let pool = await _blockfrostRequest(`/pools/${poolId}`)
-        let poolHex = pool.hex
-
-        let utxos = (await getUtxosHex()).map(u => S.TransactionUnspentOutput.from_bytes(Buffer.from(u, 'hex')))
-        let PaymentAddress = await getAddress()
-
-        let outputs = S.TransactionOutputs.new()
-        outputs.add(
-            S.TransactionOutput.new(
-              S.Address.from_bech32(PaymentAddress),
-              S.Value.new(
-                  S.BigNum.from_str(protocolParameter.keyDeposit)
-              )
-            )
-        )
-
-        /*  let transaction = _txBuilder({
-                PaymentAddress,
-                Utxos: utxos,
-                ProtocolParameter: protocolParameter,
-                Outputs: outputs,
-                Delegation: {
-                    poolHex: poolHex,
-                    stakeKeyHash: stakeKeyHash,
-                    delegation: delegation
-                },
-                Metadata: metadata,
-                MetadataLabel: metadataLabel
-            }) */
-
-            // config
-             const txConfig = S.TransactionBuilderConfigBuilder.new()
-            
-            .fee_algo(
-            S.LinearFee.new(
-                S.BigNum.from_str(protocolParameter.linearFee.minFeeA),
-                S.BigNum.from_str(protocolParameter.linearFee.minFeeB)
-            )
-            )
-            .pool_deposit(S.BigNum.from_str(protocolParameter.poolDeposit))
-            .key_deposit(S.BigNum.from_str(protocolParameter.keyDeposit))
-            .coins_per_utxo_word(S.BigNum.from_str('34482'))
-            /* .max_tx_size(protocolParameter.maxTxSize)
-            .max_value_size(protocolParameter.maxValSize) */
-            .max_value_size(4000)
-            .max_tx_size(8000)
-            .prefer_pure_change(true)
-            .build();
-
-            console.log("txConfig",txConfig)
-
-            // builder
-            const txBuilder = S.TransactionBuilder.new(txConfig); 
-            
-
-            // outputs
-            txBuilder.add_output(
-            S.TransactionOutputBuilder.new()
-            .with_address(S.Address.from_bech32(PaymentAddress))
-            //.with_address(S.Address.from_bech32("eb7832cb137b6d20ee2c3f4892d4938a734326ca18122f0d21e5f587"))
-            .next()
-            .with_value(S.Value.new(S.BigNum.from_str("999978")))
-            .build()
-            );
-
-            // convert utxos from wallet connector
-            const utxosFromWalletConnector = (await getUtxosHex()).map((utxo) =>
-            S.TransactionUnspentOutput.from_bytes(Buffer.from(utxo, "hex"))
-            );
-
-            // create TransactionUnspentOutputs for 'add_inputs_from' function
-            const utxoOutputs = S.TransactionUnspentOutputs.new();
-            utxosFromWalletConnector.map((currentUtxo) => {
-            utxoOutputs.add(currentUtxo);
-            });
-
-            // inputs with coin selection
-            // 0 for LargestFirst, 1 RandomImprove 2,3 Mutli asset
-            txBuilder.add_inputs_from(utxoOutputs, 0); 
-            txBuilder.add_change_if_needed(S.Address.from_bech32(await getAddress()));
-
-            const txBody = txBuilder.build();
-            const transaction = S.Transaction.new(
-                txBuilder.build(),
-                S.TransactionWitnessSet.new()
-            );
-
-            let walletServer =await Nami.enable();
-
-            const witness = await walletServer.signTx(
-            Buffer.from(transaction.to_bytes(), "hex").toString("hex")
-            );
-
-            const signedTx = S.Transaction.new(
-            txBody,
-            S.TransactionWitnessSet.from_bytes(Buffer.from(witness, "hex")),
-            undefined // transaction metadata
-            );
-
-            const txHash = await walletServer.submitTx(
-                Buffer.from(signedTx.to_bytes()).toString("hex")
-            ); 
-
-            return txHash 
-
-       /*  let txHash = await _signSubmitTx(transaction)
-        return txHash   */
-    }
+   
     return {
         isEnabled,
         enable,
