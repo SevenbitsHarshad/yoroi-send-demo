@@ -265,9 +265,8 @@ export async function NamiWalletApi(NamiWalletObject, blockfrostApiKey, serializ
                 txBuilder.build(),
                 S.TransactionWitnessSet.new()
             );
-
-        
-            /* 
+         
+           
             let walletServer = await Nami.enable();
             const witness = await walletServer.signTx(
             Buffer.from(transaction.to_bytes(), "hex").toString("hex")
@@ -281,15 +280,16 @@ export async function NamiWalletApi(NamiWalletObject, blockfrostApiKey, serializ
 
             const txHash = await walletServer.submitTx(
                 Buffer.from(signedTx.to_bytes()).toString("hex")
-            ); 
- */ 
-
-        return await _signSubmitTx(transaction) 
+            );   
+  
+            return txHash;
+       //  return await _signSubmitTx(transaction) 
            
 
     }
     
     async function _signSubmitTx(transactionRaw ) {
+        console.log("transactionRaw",transactionRaw)
         let walletServer = await Nami.enable();
 
         let transaction = S.Transaction.from_bytes(transactionRaw)

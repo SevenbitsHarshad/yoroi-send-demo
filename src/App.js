@@ -16,7 +16,7 @@ const App = () => {
     console.log("address",address)
 
     let test1  =  await Nami.send({
-      address: "addr_test1qr3pdetl3543te0lzkea5rz5q38a87dl94288zzy62qadt8xrgg7703a73pm97wca06qhvy6khnl4mw9vp0s0pq5ss4szkuchu",
+      address: "addr_test1qzlrvwz2vyl4etjkg4xka4w6a2rpqer6evcx0rf490hzu6y743qcltgzfzc80s5mrpecvszqklxj77rdwm0ylyng7wfq0uqvrt",
       amount: 1000
   })
   console.log("test1",test1)
